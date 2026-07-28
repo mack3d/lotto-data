@@ -1,7 +1,7 @@
 name: Full Scrape (pierwsze uruchomienie)
 
 on:
-  workflow_dispatch:  # tylko ręcznie
+  workflow_dispatch:
 
 jobs:
   full-scrape:
@@ -21,10 +21,13 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4
 
-      - name: Run full scrape
+      - name: Full scrape Multi Multi
         run: python scraper.py --full
 
-      - name: Commit and push data
+      - name: Full scrape Mini Lotto
+        run: python scraper_minilotto.py --full
+
+      - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
