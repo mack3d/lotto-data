@@ -1,6 +1,6 @@
 """
 Scraper wyników Multi Multi z megalotto.pl
-Zapisuje do data/draws.json (podzielone na roczniki)
+Zapisuje do data/ jako pliki JSON per rok
 """
 import requests
 import json
@@ -27,6 +27,7 @@ def parse_page(html):
 
     i = 0
     while i < len(lines):
+        # Szukaj numeru losowania "NNNNN."
         m = re.match(r'^(\d+)\.$', lines[i])
         if m:
             draw_no = int(m.group(1))
@@ -34,15 +35,16 @@ def parse_page(html):
                 date_m = re.match(r'^(\d{2})-(\d{2})-(\d{4})$', lines[i+1])
                 if date_m:
                     draw_date = f"{date_m.group(1)}.{date_m.group(2)}.{date_m.group(3)}"
-                    draw_time = None  # godzina losowania (14:00 lub 22:00)
+                    draw_time = None
                     nums = []
                     j = i + 2
                     while j < len(lines) and len(nums) < 20:
                         line = lines[j]
-                        # Format: "22:0014" — godzina + pierwsza liczba
-                        time_num = re.match(r'^(\d{2}:\d{2})(\d+)$', line)
+
+                        # Godzina zlepiona z liczbą: "22:0014" lub "14:0025"
+                        time_num = re.match(r'^(\d{2}:\d{2})(\d{1,2})$', line)
                         if time_num:
-                            draw_time = time_num.group(1)  # "14:00" lub "22:00"
+                            draw_time = time_num.group(1)
                             n = int(time_num.group(2))
                             if 1 <= n <= 80:
                                 nums.append(n)
@@ -51,8 +53,22 @@ def parse_page(html):
                             if 1 <= n <= 80:
                                 nums.append(n)
                         elif line.startswith("Wygrane"):
+                            # Jeśli nie znaleźliśmy godziny z liczby,
+                            # wyciągnij ją z linka "wygrane-z-dnia-22:00-25-07-2026"
+                            if draw_time is None:
+                                time_from_link = re.search(r'wygrane-z-dnia-(\d{2}:\d{2})-', line)
+                                if time_from_link:
+                                    draw_time = time_from_link.group(1)
                             break
                         j += 1
+
+                    # Jeśli nadal brak godziny, szukaj w liniach po "Wygrane"
+                    if draw_time is None and j < len(lines):
+                        for k in range(max(0, i), min(len(lines), j+3)):
+                            tl = re.search(r'wygrane-z-dnia-(\d{2}:\d{2})-', lines[k])
+                            if tl:
+                                draw_time = tl.group(1)
+                                break
 
                     if len(nums) == 20:
                         results.append({
@@ -98,7 +114,6 @@ def save_year(year, draws):
 
 
 def save_index():
-    """Zapisuje index.json z metadanymi wszystkich roczników."""
     index = []
     for year in range(START_YEAR, CURRENT_YEAR + 1):
         path = os.path.join(DATA_DIR, f"draws-{year}.json")
@@ -113,14 +128,13 @@ def save_index():
                     "last": draws[0]["date"]
                 })
 
-    # Zapisz też ostatnie 200 losowań jako osobny plik (szybkie ładowanie)
+    # Ostatnie 200 losowań jako osobny plik
     all_recent = []
     for entry in reversed(index):
         year_draws = load_year(entry["year"])
         all_recent = year_draws + all_recent
         if len(all_recent) >= 200:
             break
-
     all_recent = all_recent[:200]
 
     total = sum(e["count"] for e in index)
@@ -131,12 +145,10 @@ def save_index():
     with open(os.path.join(DATA_DIR, "latest-200.json"), "w") as f:
         json.dump(all_recent, f, ensure_ascii=False)
 
-    print(f"Index: {total} losowań, {len(index)} roczników")
-    print(f"Latest-200: {len(all_recent)} losowań")
+    print(f"Index: {total} losowań | Latest-200: {len(all_recent)} losowań")
 
 
 def run_full():
-    """Pierwsze uruchomienie — pobiera całe archiwum."""
     for year in range(START_YEAR, CURRENT_YEAR + 1):
         draws = scrape_year(year)
         if draws:
@@ -146,22 +158,14 @@ def run_full():
 
 
 def run_update():
-    """Aktualizacja — tylko bieżący rok."""
     existing = load_year(CURRENT_YEAR)
-    max_no = max((d["no"] for d in existing), default=0)
-
     fresh = scrape_year(CURRENT_YEAR)
     if not fresh:
         return
-
-    # Połącz stare i nowe, deduplikuj po numerze
     merged = {d["no"]: d for d in existing}
-    new_count = 0
+    new_count = sum(1 for d in fresh if d["no"] not in merged)
     for d in fresh:
-        if d["no"] not in merged:
-            new_count += 1
         merged[d["no"]] = d
-
     result = sorted(merged.values(), key=lambda x: x["no"], reverse=True)
     save_year(CURRENT_YEAR, result)
     save_index()
