@@ -1,17 +1,17 @@
-name: Scrape Multi Multi
+name: Scrape wyniki
 
 on:
   schedule:
-    # 14:35 i 22:35 czasu polskiego (UTC+2) = 12:35 i 20:35 UTC
+    # Multi Multi: 14:35 i 22:35 (UTC+2 = 12:35 i 20:35 UTC)
     - cron: '35 12 * * *'
     - cron: '35 20 * * *'
-  workflow_dispatch:  # możliwość ręcznego uruchomienia
+  workflow_dispatch:
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # pozwól na commit do repozytorium
+      contents: write
 
     steps:
       - name: Checkout repo
@@ -25,10 +25,13 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4
 
-      - name: Run scraper
+      - name: Scrape Multi Multi
         run: python scraper.py
 
-      - name: Commit and push data
+      - name: Scrape Mini Lotto
+        run: python scraper_minilotto.py
+
+      - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
