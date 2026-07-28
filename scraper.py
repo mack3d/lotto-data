@@ -34,13 +34,16 @@ def parse_page(html):
                 date_m = re.match(r'^(\d{2})-(\d{2})-(\d{4})$', lines[i+1])
                 if date_m:
                     draw_date = f"{date_m.group(1)}.{date_m.group(2)}.{date_m.group(3)}"
+                    draw_time = None  # godzina losowania (14:00 lub 22:00)
                     nums = []
                     j = i + 2
                     while j < len(lines) and len(nums) < 20:
                         line = lines[j]
-                        time_num = re.match(r'^\d{2}:\d{2}(\d+)$', line)
+                        # Format: "22:0014" — godzina + pierwsza liczba
+                        time_num = re.match(r'^(\d{2}:\d{2})(\d+)$', line)
                         if time_num:
-                            n = int(time_num.group(1))
+                            draw_time = time_num.group(1)  # "14:00" lub "22:00"
+                            n = int(time_num.group(2))
                             if 1 <= n <= 80:
                                 nums.append(n)
                         elif re.match(r'^\d{1,2}$', line):
@@ -55,6 +58,7 @@ def parse_page(html):
                         results.append({
                             "no": draw_no,
                             "date": draw_date,
+                            "time": draw_time or "?",
                             "numbers": sorted(nums)
                         })
                     i = j
