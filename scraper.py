@@ -1,80 +1,96 @@
 """
 Scraper wyników Multi Multi z megalotto.pl
 Zapisuje do data/ jako pliki JSON per rok
+Data i godzina w formacie UTC ISO 8601
 """
 import requests
 import json
 import re
 import time
 import os
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
+from zoneinfo import ZoneInfo
 
 BASE_URL = "https://megalotto.pl/wyniki/multi-multi/losowania-z-roku-{year}"
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; LottoScraper/1.0)"}
 DATA_DIR = "data"
 CURRENT_YEAR = datetime.now().year
 START_YEAR = 1996
+TZ_PL = ZoneInfo("Europe/Warsaw")
+
+
+def to_utc(date_str, time_str):
+    """
+    Konwertuje datę DD.MM.YYYY i godzinę HH:MM (czas warszawski) na UTC ISO 8601.
+    Przykład: "27.07.2026", "22:00" → "2026-07-27T20:00:00Z"
+    """
+    try:
+        dd, mm, yyyy = date_str.split(".")
+        hh, mi = time_str.split(":")
+        local_dt = datetime(int(yyyy), int(mm), int(dd), int(hh), int(mi),
+                            tzinfo=TZ_PL)
+        utc_dt = local_dt.astimezone(timezone.utc)
+        return utc_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    except Exception:
+        return None
 
 
 def parse_page(html):
-    """Parsuje stronę roczną megalotto.pl — zwraca listę losowań."""
+    """Parsuje stronę roczną megalotto.pl przez tagi HTML."""
     soup = BeautifulSoup(html, "html.parser")
     results = []
-
-    text = soup.get_text("\n")
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    all_li = soup.find_all("li")
 
     i = 0
-    while i < len(lines):
-        # Szukaj numeru losowania "NNNNN."
-        m = re.match(r'^(\d+)\.$', lines[i])
+    while i < len(all_li):
+        text = all_li[i].get_text(strip=True)
+        m = re.match(r'^(\d+)\.$', text)
         if m:
             draw_no = int(m.group(1))
-            if i + 1 < len(lines):
-                date_m = re.match(r'^(\d{2})-(\d{2})-(\d{4})$', lines[i+1])
+            if i + 1 < len(all_li):
+                date_text = all_li[i+1].get_text(strip=True)
+                date_m = re.match(r'^(\d{2})-(\d{2})-(\d{4})$', date_text)
                 if date_m:
                     draw_date = f"{date_m.group(1)}.{date_m.group(2)}.{date_m.group(3)}"
                     draw_time = None
                     nums = []
                     j = i + 2
-                    while j < len(lines) and len(nums) < 20:
-                        line = lines[j]
 
-                        # Godzina zlepiona z liczbą: "22:0014" lub "14:0025"
-                        time_num = re.match(r'^(\d{2}:\d{2})(\d{1,2})$', line)
+                    while j < len(all_li) and len(nums) < 20:
+                        li_text = all_li[j].get_text(strip=True)
+
+                        # Godzina z linku do wygranych (pewna metoda)
+                        link = all_li[j].find("a", href=True)
+                        if link:
+                            href = link.get("href", "")
+                            t = re.search(r'wygrane-z-dnia-(\d{2}:\d{2})-', href)
+                            if t:
+                                draw_time = t.group(1)
+                            break
+
+                        # Liczba: "22:0019" lub samo "14"
+                        time_num = re.match(r'^(\d{2}:\d{2})(\d{1,2})$', li_text)
                         if time_num:
-                            draw_time = time_num.group(1)
+                            if draw_time is None:
+                                draw_time = time_num.group(1)
                             n = int(time_num.group(2))
                             if 1 <= n <= 80:
                                 nums.append(n)
-                        elif re.match(r'^\d{1,2}$', line):
-                            n = int(line)
+                        elif re.match(r'^\d{1,2}$', li_text):
+                            n = int(li_text)
                             if 1 <= n <= 80:
                                 nums.append(n)
-                        elif line.startswith("Wygrane"):
-                            # Jeśli nie znaleźliśmy godziny z liczby,
-                            # wyciągnij ją z linka "wygrane-z-dnia-22:00-25-07-2026"
-                            if draw_time is None:
-                                time_from_link = re.search(r'wygrane-z-dnia-(\d{2}:\d{2})-', line)
-                                if time_from_link:
-                                    draw_time = time_from_link.group(1)
-                            break
                         j += 1
 
-                    # Jeśli nadal brak godziny, szukaj w liniach po "Wygrane"
-                    if draw_time is None and j < len(lines):
-                        for k in range(max(0, i), min(len(lines), j+3)):
-                            tl = re.search(r'wygrane-z-dnia-(\d{2}:\d{2})-', lines[k])
-                            if tl:
-                                draw_time = tl.group(1)
-                                break
-
                     if len(nums) == 20:
+                        draw_time = draw_time or "22:00"  # fallback
+                        utc_dt = to_utc(draw_date, draw_time)
                         results.append({
                             "no": draw_no,
                             "date": draw_date,
-                            "time": draw_time or "?",
+                            "time": draw_time,
+                            "utc": utc_dt,
                             "numbers": sorted(nums)
                         })
                     i = j
@@ -128,7 +144,6 @@ def save_index():
                     "last": draws[0]["date"]
                 })
 
-    # Ostatnie 200 losowań jako osobny plik
     all_recent = []
     for entry in reversed(index):
         year_draws = load_year(entry["year"])
@@ -136,7 +151,6 @@ def save_index():
         if len(all_recent) >= 200:
             break
     all_recent = all_recent[:200]
-
     total = sum(e["count"] for e in index)
 
     with open(os.path.join(DATA_DIR, "index.json"), "w") as f:
@@ -145,7 +159,7 @@ def save_index():
     with open(os.path.join(DATA_DIR, "latest-200.json"), "w") as f:
         json.dump(all_recent, f, ensure_ascii=False)
 
-    print(f"Index: {total} losowań | Latest-200: {len(all_recent)} losowań")
+    print(f"Index: {total} losowań | Latest-200: {len(all_recent)}")
 
 
 def run_full():
