@@ -2,9 +2,12 @@ name: Scrape wyniki
 
 on:
   schedule:
-    # Multi Multi: 14:35 i 22:35 (UTC+2 = 12:35 i 20:35 UTC)
+    # Multi Multi i Mini Lotto: 14:35 i 22:35 (UTC+2 = 12:35 i 20:35 UTC)
     - cron: '35 12 * * *'
     - cron: '35 20 * * *'
+    # Keno: co 10 minut od 06:30 do 00:00 PL (04:30-22:00 UTC)
+    - cron: '*/5 4-21 * * *'
+    - cron: '*/5 22 * * *'
   workflow_dispatch:
 
 jobs:
@@ -26,15 +29,22 @@ jobs:
         run: pip install requests beautifulsoup4
 
       - name: Scrape Multi Multi
+        # Tylko przy losowaniach MM (2x dziennie)
+        if: github.event.schedule == '35 12 * * *' || github.event.schedule == '35 20 * * *' || github.event_name == 'workflow_dispatch'
         run: python scraper.py
 
       - name: Scrape Mini Lotto
+        # Tylko przy losowaniu ML (1x dziennie wieczorem)
+        if: github.event.schedule == '35 20 * * *' || github.event_name == 'workflow_dispatch'
         run: python scraper_minilotto.py
+
+      - name: Scrape Keno
+        run: python scraper_keno.py
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/
-          git diff --staged --quiet || git commit -m "Update draws $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git diff --staged --quiet || git commit -m "Update $(date -u '+%Y-%m-%d %H:%M UTC')"
           git push
