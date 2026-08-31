@@ -2,6 +2,11 @@ name: Full Scrape (pierwsze uruchomienie)
 
 on:
   workflow_dispatch:
+    inputs:
+      keno_days:
+        description: 'Ile dni wstecz dla Keno (domyślnie 30)'
+        required: false
+        default: '30'
 
 jobs:
   full-scrape:
@@ -26,6 +31,9 @@ jobs:
 
       - name: Full scrape Mini Lotto
         run: python scraper_minilotto.py --full
+
+      - name: Full scrape Keno
+        run: python scraper_keno.py --full ${{ github.event.inputs.keno_days }}
 
       - name: Commit and push
         run: |
